@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validConfig, validDuration, makeQuestion, answerFor, parseAnswer, checkAnswer, remainingMs, summarize, rankedRecords, formatClock } from '../dist/core.mjs';
+import { DIVISION_RULE, validConfig, validDuration, normalizeConfig, isExactDivision, isPrime, isAllowedDividend, isAllowedDivisor, makeQuestion, answerFor, parseAnswer, checkAnswer, remainingMs, summarize, rankedRecords, formatClock } from '../dist/core.mjs';
 
-test('all 144 digit/operator combinations retain each operand’s configured digit length', () => {
+test('all supported digit/operator combinations retain each operand’s configured digit length', () => {
   for (const operator of ['add','subtract','multiply','divide']) for (let n=1;n<=6;n++) for (let m=1;m<=6;m++) {
+    if (operator === 'divide' && n < m) {
+      assert.throws(() => makeQuestion({n,m,operator}), /位数/);
+      continue;
+    }
     for (const rng of [() => 0, () => 0.999999999, Math.random]) {
       const q = makeQuestion({ n, m, operator }, rng);
       assert.equal(String(q.a).length,n); assert.equal(String(q.b).length,m); assert.ok(q.b > 0);
@@ -11,16 +15,55 @@ test('all 144 digit/operator combinations retain each operand’s configured dig
     }
   }
 });
-test('calculations handle negative answers, large products and rounded division', () => {
+test('calculations handle negative answers, large products and exact integer division', () => {
   assert.equal(answerFor({a:9,b:99},'subtract'),-90);
   assert.equal(answerFor({a:999999,b:999999},'multiply'),999998000001);
-  assert.equal(answerFor({a:1,b:6},'divide'),0.17);
-  assert.equal(answerFor({a:1,b:8},'divide'),0.13);
-  assert.equal(answerFor({a:99,b:10},'divide'),9.9);
-  assert.equal(answerFor({a:1,b:999999},'divide'),0);
-  assert.equal(checkAnswer({a:99,b:10},'divide','9.90'),true);
+  assert.equal(answerFor({a:96,b:12},'divide'),8);
+  assert.equal(answerFor({a:999998,b:499999},'divide'),2);
+  assert.equal(checkAnswer({a:96,b:12},'divide','8.00'),true);
+  assert.equal(checkAnswer({a:96,b:12},'divide','8.0000000001'),false);
   assert.equal(checkAnswer({a:9,b:99},'subtract','−90'),true);
-  assert.equal(checkAnswer({a:1,b:6},'divide','0.166666'),false);
+  assert.equal(checkAnswer({a:96,b:12},'divide','7.99'),false);
+});
+test('every division has a larger composite dividend, a divisor greater than 1 and an integer quotient', () => {
+  const primeByTrial = number => {
+    if (number < 2) return false;
+    for (let d=2;d*d<=number;d++) if (number%d===0) return false;
+    return true;
+  };
+  let state = 941;
+  const seeded = () => { state = (state * 16807) % 2147483647; return (state-1) / 2147483646; };
+  for (let n=1;n<=6;n++) for (let m=1;m<=n;m++) {
+    for (const random of [()=>0,()=>1,()=>0.5,seeded]) for (let i=0;i<250;i++) {
+      const q = makeQuestion({n,m,operator:'divide'}, random);
+      assert.equal(String(q.a).length,n); assert.equal(String(q.b).length,m);
+      assert.ok(q.a > q.b); assert.equal(q.a % q.b,0); assert.ok(q.b > 1);
+      assert.equal(primeByTrial(q.a),false,`prime dividend ${q.a}`);
+      assert.ok(Number.isInteger(q.a / q.b));
+    }
+  }
+  // Prime divisors 2 and 3 must remain reachable; neither operand may be 1.
+  assert.deepEqual(makeQuestion({n:1,m:1,operator:'divide'},()=>0),{a:4,b:2});
+  assert.deepEqual(makeQuestion({n:1,m:1,operator:'divide'},()=>0.5),{a:9,b:3});
+  assert.deepEqual(makeQuestion({n:1,m:1,operator:'divide'},()=>1),{a:8,b:4});
+});
+test('dividends exclude primes and 1, while divisors allow primes but exclude 1', () => {
+  for (const value of [2,3,5,7,11,97,499,999983]) assert.equal(isPrime(value),true);
+  for (const value of [1,4,6,8,9,10,100,999999]) assert.equal(isPrime(value),false);
+  for (const value of [0,1,2,3,5,7,11,97,999983]) assert.equal(isAllowedDividend(value),false);
+  for (const value of [4,6,8,9,10,12,100,999999]) assert.equal(isAllowedDividend(value),true);
+  for (const value of [-1,0,1,1.5]) assert.equal(isAllowedDivisor(value),false);
+  for (const value of [2,3,4,5,7,11,97,999983]) assert.equal(isAllowedDivisor(value),true);
+  assert.equal(isExactDivision({a:8,b:4}),true);
+  for (const q of [{a:4,b:4},{a:4,b:8},{a:10,b:4},{a:10,b:0}]) assert.equal(isExactDivision(q),false);
+});
+test('division settings keep the changed digit field and adjust the other side when necessary', () => {
+  const c = {n:1,m:3,operator:'divide'};
+  assert.deepEqual(normalizeConfig(c),{n:3,m:3,operator:'divide'});
+  assert.deepEqual(normalizeConfig(c,'n'),{n:1,m:1,operator:'divide'});
+  assert.deepEqual(normalizeConfig(c,'m'),{n:3,m:3,operator:'divide'});
+  assert.deepEqual(c,{n:1,m:3,operator:'divide'});
+  assert.deepEqual(normalizeConfig({...c,operator:'subtract'}),{n:1,m:3,operator:'subtract'});
 });
 test('strict numeric input rejects empty strings, expressions, infinity, exponent syntax and partial values', () => {
   for (const invalid of ['', ' ', '1+2', '1abc','Infinity','NaN','0x10','1e2','1,000','--1','.']) assert.equal(parseAnswer(invalid),null,invalid);
@@ -45,4 +88,15 @@ test('leaderboards isolate both digit positions, operator and duration; early ex
   const records=[r('lower',{correct:1}),r('accurate',{correct:2,attempted:2}),r('best',{correct:3}),r('regular'),r('early',{completed:false,correct:50}),r('other-digits',{config:{...cfg,n:3}}),r('other-right',{config:{...cfg,m:3}}),r('other-op',{config:{...cfg,operator:'subtract'}}),r('other-time',{durationSeconds:600})];
   assert.deepEqual(rankedRecords(records,cfg,60).map(x=>x.id),['best','accurate','regular','lower']);
   assert.equal(records[0].id,'lower');
+});
+test('new division leaderboards exclude old rules while preserving archived records and the rule on summaries', () => {
+  const config = {n:2,m:2,operator:'divide'};
+  const session = {...base,config,divisionRule:DIVISION_RULE};
+  const current = summarize(session,61000);
+  assert.equal(current.divisionRule,DIVISION_RULE);
+  const legacy = {...current,id:'legacy',correct:3}; delete legacy.divisionRule;
+  const oldExact = {...current,id:'old-exact',divisionRule:'exact-larger-v1'};
+  const records = [legacy,oldExact,current];
+  assert.deepEqual(rankedRecords(records,config,60).map(r=>r.id),['s']);
+  assert.equal(records.length,3);
 });

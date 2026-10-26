@@ -5,3 +5,9 @@ node_modules/
 .sites/
 *.log
 qa/
+__pycache__/
+release/
+coverage/
+.openai/
+*.tmp
+*.bak

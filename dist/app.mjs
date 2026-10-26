@@ -1,17 +1,23 @@
-import { SYMBOLS, NAMES, DEFAULT_CONFIG, validConfig, validDuration, makeQuestion, answerFor, parseAnswer, checkAnswer, remainingMs, summarize, rankedRecords, formatClock, modeLabel } from './core.mjs';
+import { SYMBOLS, NAMES, DEFAULT_CONFIG, DIVISION_RULE, validConfig, validDuration, normalizeConfig, isExactDivision, isAllowedDividend, isAllowedDivisor, makeQuestion, answerFor, parseAnswer, checkAnswer, remainingMs, summarize, rankedRecords, formatClock, modeLabel } from './core.mjs';
 
 const $ = selector => document.querySelector(selector);
 const app = $('#app'), dialog = $('#dialog');
+const isDesktop = window.ArithmeticDesktop === true;
+const storage = window.arithmeticStorage ?? {
+  getItem: key => window.localStorage.getItem(key),
+  setItem: (key, value) => window.localStorage.setItem(key, value),
+  removeItem: key => window.localStorage.removeItem(key)
+};
 const KEYS = { config: 'arithmetic-studio.config.v1', duration: 'arithmetic-studio.duration.v1', records: 'arithmetic-studio.records.v1', session: 'arithmetic-studio.session.v1' };
 let storageAvailable = true, screen = 'home', tickInterval, nextTimeout, toastTimeout, busy = false, result, session;
 let draft, sample, rankConfig, rankMinutes;
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
-function read(key, fallback) { try { const raw = localStorage.getItem(key); return raw === null ? fallback : JSON.parse(raw); } catch { return fallback; } }
-function write(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { storageAvailable = false; return false; } }
-function remove(key) { try { localStorage.removeItem(key); } catch { storageAvailable = false; } }
-try { localStorage.setItem('arithmetic-studio.probe', '1'); localStorage.removeItem('arithmetic-studio.probe'); } catch { storageAvailable = false; }
+function read(key, fallback) { try { const raw = storage.getItem(key); return raw === null ? fallback : JSON.parse(raw); } catch { return fallback; } }
+function write(key, value) { try { storage.setItem(key, JSON.stringify(value)); return true; } catch { storageAvailable = false; return false; } }
+function remove(key) { try { storage.removeItem(key); } catch { storageAvailable = false; } }
+try { storage.setItem('arithmetic-studio.probe', '1'); storage.removeItem('arithmetic-studio.probe'); } catch { storageAvailable = false; }
 const storedConfig = read(KEYS.config, null);
-let config = validConfig(storedConfig) ? storedConfig : { ...DEFAULT_CONFIG };
+let config = normalizeConfig(validConfig(storedConfig) ? storedConfig : DEFAULT_CONFIG);
 let minutes = read(KEYS.duration, 10);
 if (!validDuration(minutes)) minutes = 10;
 function isRecord(r) {
@@ -33,7 +39,13 @@ function icon(name, size = 20) { return `<svg width="${size}" height="${size}" v
 function toast(message) { clearTimeout(toastTimeout); $('#toast').textContent = message; $('#toast').classList.add('visible'); toastTimeout = setTimeout(() => $('#toast').classList.remove('visible'), 3000); }
 const accuracy = r => r.attempted ? `${Math.round(r.correct / r.attempted * 100)}%` : '—';
 const dateTime = timestamp => new Intl.DateTimeFormat('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).format(timestamp);
-const note = c => c.operator === 'divide' ? '除法答案四舍五入保留两位小数，末尾的 0 可省略。' : c.operator === 'subtract' ? '减法可能出现负数，输入时请带上负号。' : '输入答案，按 Enter 提交。完成后自动进入下一题。';
+const note = c => c.operator === 'divide' ? '被除数排除 1 和质数；除数只排除 1。大数除以小数，且能整除。' : c.operator === 'subtract' ? '减法可能出现负数，输入时请带上负号。' : '输入答案，按 Enter 提交。完成后自动进入下一题。';
+function updateDraft(changedField) {
+  const adjusted = draft.operator === 'divide' && draft.n < draft.m;
+  draft = normalizeConfig(draft, changedField);
+  sample = makeQuestion(draft); renderSettings();
+  if (adjusted) toast('除法需大数除以小数，已同步调整另一侧的位数。');
+}
 
 function shell(content) {
   app.innerHTML = `<div class="wrap"><header><button class="brand" data-action="home" aria-label="返回首页"><span class="brand-mark">+</span><span><span class="brand-name">算数练习室</span><span class="brand-sub" style="display:block">ARITHMETIC STUDIO</span></span></button><div class="header-right"><span class="header-caption">把进步，留给每一天</span><span class="status-dot"></span><span>你的专属练习空间</span></div></header>${!storageAvailable ? '<div class="storage-banner" role="status">浏览器存储不可用，本次仍可练习；关闭页面后设置和成绩将无法保存。</div>' : ''}<main id="main" class="page" tabindex="-1">${content}</main><footer class="footer"><span>一点练习，一点进步。</span><span class="footer-phrase">${icon('shield', 12)} 个人成绩保存在当前浏览器</span></footer></div>`;
@@ -63,7 +75,8 @@ function begin(value) {
   if (!validDuration(value)) { $('#start-error').textContent = '请输入 1–120 之间的整数分钟。'; return; }
   minutes = value; write(KEYS.duration, minutes);
   const now = Date.now();
-  session = { id: crypto.randomUUID ? crypto.randomUUID() : `${now}-${Math.random().toString(36).slice(2)}`, config:{...config}, durationSeconds: minutes * 60, startedAt: now, deadline: now + minutes * 60000, answers:[], question:makeQuestion(config) };
+  config = normalizeConfig(config);
+  session = { id: crypto.randomUUID ? crypto.randomUUID() : `${now}-${Math.random().toString(36).slice(2)}`, config:{...config}, durationSeconds: minutes * 60, startedAt: now, deadline: now + minutes * 60000, answers:[], question:makeQuestion(config), ...(config.operator === 'divide' ? { divisionRule: DIVISION_RULE } : {}) };
   busy = false; write(KEYS.session, session); dialog.close(); screen = 'practice'; renderPractice(); startTimer();
 }
 function renderPractice() {
@@ -130,14 +143,15 @@ function finish() {
 function renderResult() {
   const ranking = rankedRecords(records, result.config, result.durationSeconds);
   const place = ranking.findIndex(r => r.id === result.id) + 1;
+  const legacyDivision = result.config.operator === 'divide' && result.divisionRule !== DIVISION_RULE;
   const mistakes = result.answers.filter(a => !a.correct);
-  shell(`<section class="inner-page"><button class="back" data-action="home">${icon('back', 15)} 返回首页</button><div class="result-layout"><div class="panel result-hero"><div class="result-emblem">${icon(result.completed ? 'trophy' : 'leaf', 30)}</div><h1 class="result-title">${result.completed ? '又向前进了一点。' : '每一道练习，都算数。'}</h1><p class="result-description">${modeLabel(result.config)} · ${result.completed ? `${result.durationSeconds / 60} 分钟练习已完成` : '本次练习已提前结束'}</p><div class="result-numbers">${[[result.correct,'答对题数'],[result.attempted,'已做题数'],[accuracy(result),'正确率'],[formatClock(result.elapsedSeconds),'实际用时']].map(([v,k]) => `<div><div class="stat-number">${v}</div><div class="stat-label">${k}</div></div>`).join('')}</div><div class="result-actions"><button class="primary-btn" data-action="again">${icon('refresh', 16)} 再练一次</button><button class="secondary-btn" data-action="result-ranking">${icon('trophy', 16)} 查看排行榜</button><button class="secondary-btn" data-action="home">返回首页</button></div><div class="result-status">${result.completed ? `${storageAvailable ? '成绩已保存' : '本页临时记录'} · 同类 ${result.durationSeconds / 60} 分钟练习排名第 ${place} 名` : '提前结束的成绩不参与排行榜，完整练习后再来挑战。'}</div></div>${mistakes.length ? `<details class="panel mistakes"><summary>回顾错题 · ${mistakes.length} 道</summary>${mistakes.map(a => `<div class="mistake-row"><span>${esc(a.a)} ${SYMBOLS[result.config.operator]} ${esc(a.b)} = <strong>${esc(a.expected)}</strong></span><small>你的答案：${esc(a.input)}</small></div>`).join('')}</details>` : result.attempted ? '<p class="run-reminder">这次全部答对了，下一次也继续保持。</p>' : '<p class="run-reminder">本次没有提交答案。下次从第一题开始。</p>'}</div></section>`);
+  shell(`<section class="inner-page"><button class="back" data-action="home">${icon('back', 15)} 返回首页</button><div class="result-layout"><div class="panel result-hero"><div class="result-emblem">${icon(result.completed ? 'trophy' : 'leaf', 30)}</div><h1 class="result-title">${result.completed ? '又向前进了一点。' : '每一道练习，都算数。'}</h1><p class="result-description">${modeLabel(result.config)} · ${result.completed ? `${result.durationSeconds / 60} 分钟练习已完成` : '本次练习已提前结束'}</p><div class="result-numbers">${[[result.correct,'答对题数'],[result.attempted,'已做题数'],[accuracy(result),'正确率'],[formatClock(result.elapsedSeconds),'实际用时']].map(([v,k]) => `<div><div class="stat-number">${v}</div><div class="stat-label">${k}</div></div>`).join('')}</div><div class="result-actions"><button class="primary-btn" data-action="again">${icon('refresh', 16)} 再练一次</button><button class="secondary-btn" data-action="result-ranking">${icon('trophy', 16)} 查看排行榜</button><button class="secondary-btn" data-action="home">返回首页</button></div><div class="result-status">${legacyDivision ? '旧规则成绩已保留，不参与当前整除排行榜。' : result.completed ? `${storageAvailable ? '成绩已保存' : '本页临时记录'} · 同类 ${result.durationSeconds / 60} 分钟练习排名第 ${place} 名` : '提前结束的成绩不参与排行榜，完整练习后再来挑战。'}</div></div>${mistakes.length ? `<details class="panel mistakes"><summary>回顾错题 · ${mistakes.length} 道</summary>${mistakes.map(a => `<div class="mistake-row"><span>${esc(a.a)} ${SYMBOLS[result.config.operator]} ${esc(a.b)} = <strong>${esc(a.expected)}</strong></span><small>你的答案：${esc(a.input)}</small></div>`).join('')}</details>` : result.attempted ? '<p class="run-reminder">这次全部答对了，下一次也继续保持。</p>' : '<p class="run-reminder">本次没有提交答案。下次从第一题开始。</p>'}</div></section>`);
 }
 function options(count, selected, label) { return Array.from({length:count}, (_,i) => `<option value="${i+1}" ${i+1 === selected ? 'selected' : ''}>${i+1} ${label}</option>`).join(''); }
 function renderRanking() {
   const ranking = rankedRecords(records, rankConfig, rankMinutes * 60);
   const durations = [...new Set([1,5,10,15,20,30,rankMinutes,...records.filter(r => r.completed).map(r => r.durationSeconds / 60)])].sort((a,b) => a-b);
-  shell(`<section class="inner-page"><button class="back" data-action="home">${icon('back', 15)} 返回首页</button><div class="page-heading"><div><h1>和过去的自己比一比</h1><p>相同位数、运算符与时长，每一份进步都算数。</p></div><span class="pill">${icon('trophy', 13)} 个人排行榜</span></div><div class="filters"><div class="filter-field"><label for="rank-n">左侧数字位数</label><select id="rank-n" data-filter="n">${options(6,rankConfig.n,'位数')}</select></div><div class="filter-field"><label for="rank-operator">运算符</label><select id="rank-operator" data-filter="operator">${Object.keys(SYMBOLS).map(op => `<option value="${op}" ${op === rankConfig.operator ? 'selected' : ''}>${SYMBOLS[op]} ${NAMES[op]}</option>`).join('')}</select></div><div class="filter-field"><label for="rank-m">右侧数字位数</label><select id="rank-m" data-filter="m">${options(6,rankConfig.m,'位数')}</select></div><div class="filter-field"><label for="rank-duration">练习时长</label><select id="rank-duration" data-filter="duration">${durations.map(n => `<option value="${n}" ${n === rankMinutes ? 'selected' : ''}>${n} 分钟</option>`).join('')}</select></div></div><div class="panel leaderboard-panel">${ranking.length ? `<div class="table-wrap"><table><thead><tr><th>排名</th><th>答对 / 做题数</th><th>正确率</th><th>练习用时</th><th>练习时间</th></tr></thead><tbody>${ranking.map((r,i) => `<tr><td><span class="rank ${i < 3 ? 'top' : ''} ${i === 0 ? 'first' : ''}">${String(i+1).padStart(2,'0')}</span></td><td class="score">${r.correct}<span style="font-size:12px;color:#9ca58f"> / ${r.attempted} 题</span></td><td>${accuracy(r)}</td><td>${formatClock(r.durationSeconds)}</td><td class="date-cell">${esc(dateTime(r.startedAt))}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="empty-icon">${icon('trophy', 29)}</div><h2>第一份纪录，等你来写</h2><p>${modeLabel(rankConfig)} · ${rankMinutes} 分钟<br>完成一次完整练习，你的成绩就会出现在这里。</p><button class="primary-btn" data-action="rank-start">开始这组练习 ${icon('arrow', 16)}</button></div>`}</div><div class="ranking-note">${icon('info', 14)}<span>仅比较相同模式、相同时长的完整练习。按答对题数排序，相同时优先比较正确率，再按完成先后排序。<br>成绩属于当前浏览器；清除浏览器数据会删除记录。</span></div></section>`);
+  shell(`<section class="inner-page"><button class="back" data-action="home">${icon('back', 15)} 返回首页</button><div class="page-heading"><div><h1>和过去的自己比一比</h1><p>相同位数、运算符与时长，每一份进步都算数。</p></div><span class="pill">${icon('trophy', 13)} 个人排行榜</span></div><div class="filters"><div class="filter-field"><label for="rank-n">左侧数字位数</label><select id="rank-n" data-filter="n">${options(6,rankConfig.n,'位数')}</select></div><div class="filter-field"><label for="rank-operator">运算符</label><select id="rank-operator" data-filter="operator">${Object.keys(SYMBOLS).map(op => `<option value="${op}" ${op === rankConfig.operator ? 'selected' : ''}>${SYMBOLS[op]} ${NAMES[op]}</option>`).join('')}</select></div><div class="filter-field"><label for="rank-m">右侧数字位数</label><select id="rank-m" data-filter="m">${options(6,rankConfig.m,'位数')}</select></div><div class="filter-field"><label for="rank-duration">练习时长</label><select id="rank-duration" data-filter="duration">${durations.map(n => `<option value="${n}" ${n === rankMinutes ? 'selected' : ''}>${n} 分钟</option>`).join('')}</select></div></div><div class="panel leaderboard-panel">${ranking.length ? `<div class="table-wrap"><table><thead><tr><th>排名</th><th>答对 / 做题数</th><th>正确率</th><th>练习用时</th><th>练习时间</th></tr></thead><tbody>${ranking.map((r,i) => `<tr><td><span class="rank ${i < 3 ? 'top' : ''} ${i === 0 ? 'first' : ''}">${String(i+1).padStart(2,'0')}</span></td><td class="score">${r.correct}<span style="font-size:12px;color:#9ca58f"> / ${r.attempted} 题</span></td><td>${accuracy(r)}</td><td>${formatClock(r.durationSeconds)}</td><td class="date-cell">${esc(dateTime(r.startedAt))}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty-state"><div class="empty-icon">${icon('trophy', 29)}</div><h2>第一份纪录，等你来写</h2><p>${modeLabel(rankConfig)} · ${rankMinutes} 分钟<br>完成一次完整练习，你的成绩就会出现在这里。</p><button class="primary-btn" data-action="rank-start">开始这组练习 ${icon('arrow', 16)}</button></div>`}</div><div class="ranking-note">${icon('info', 14)}<span>仅比较相同模式、相同时长的完整练习。按答对题数排序，相同时优先比较正确率，再按完成先后排序。${rankConfig.operator === 'divide' ? '<br>除法排行榜仅计入新整除规则下的练习，旧成绩仍保留。' : ''}<br>成绩属于当前浏览器；清除浏览器数据会删除记录。</span></div></section>`);
 }
 
 document.addEventListener('click', event => {
@@ -148,16 +162,16 @@ document.addEventListener('click', event => {
     case 'home': case 'settings': case 'ranking': go(action); break;
     case 'start': startDialog(); break;
     case 'close-dialog': dialog.close(); if (screen === 'practice') $('#answer')?.focus(); break;
-    case 'step': draft[key] = Math.max(1,Math.min(6,draft[key]+Number(delta))); sample = makeQuestion(draft); renderSettings(); break;
-    case 'operator': draft.operator = value; sample = makeQuestion(draft); renderSettings(); break;
+    case 'step': draft[key] = Math.max(1,Math.min(6,draft[key]+Number(delta))); updateDraft(key); break;
+    case 'operator': draft.operator = value; updateDraft('operator'); break;
     case 'sample': sample = makeQuestion(draft); renderSettings(); break;
     case 'save-settings': config = {...draft}; write(KEYS.config,config); go('home'); toast(storageAvailable ? '设置已保存，下一次练习就用这个模式。' : '设置已生效，当前浏览器无法永久保存。'); break;
     case 'duration': $('#duration').value = value; dialog.querySelectorAll('.chip').forEach(el => el.classList.toggle('selected',el.dataset.value === value)); $('#start-error').textContent = ''; break;
     case 'end': endDialog(); break;
     case 'confirm-end': finish(); break;
-    case 'again': config = {...result.config}; minutes = result.durationSeconds / 60; write(KEYS.config,config); startDialog(); break;
-    case 'result-ranking': screen = 'ranking'; rankConfig = {...result.config}; rankMinutes = result.durationSeconds / 60; renderRanking(); break;
-    case 'rank-start': config = {...rankConfig}; minutes = rankMinutes; write(KEYS.config,config); startDialog(); break;
+    case 'again': config = normalizeConfig(result.config); minutes = result.durationSeconds / 60; write(KEYS.config,config); startDialog(); break;
+    case 'result-ranking': screen = 'ranking'; rankConfig = normalizeConfig(result.config); rankMinutes = result.durationSeconds / 60; renderRanking(); break;
+    case 'rank-start': config = normalizeConfig(rankConfig); minutes = rankMinutes; write(KEYS.config,config); startDialog(); break;
   }
 });
 document.addEventListener('submit', event => {
@@ -172,10 +186,17 @@ document.addEventListener('change', event => {
   if (!key) return;
   if (key === 'duration') rankMinutes = Number(event.target.value);
   else rankConfig[key] = key === 'operator' ? event.target.value : Number(event.target.value);
+  const adjusted = rankConfig.operator === 'divide' && rankConfig.n < rankConfig.m;
+  rankConfig = normalizeConfig(rankConfig, key);
   const id = event.target.id; renderRanking(); $(`#${id}`)?.focus();
+  if (adjusted) toast('除法左侧位数不能少于右侧，已同步调整。');
 });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') updateTimer(); });
 window.addEventListener('pageshow', () => updateTimer());
+window.addEventListener('arithmetic-storage-error', () => {
+  storageAvailable = false;
+  toast(isDesktop ? '本地数据保存失败，请检查磁盘空间或文件权限。' : '数据保存失败，请检查浏览器存储权限。');
+});
 
 function restoreSession() {
   const s = read(KEYS.session, null);
@@ -184,6 +205,12 @@ function restoreSession() {
   if (!s.question || !validOperand(s.question.a,s.config.n) || !validOperand(s.question.b,s.config.m)) return false;
   if (!s.answers.every(a => a && validOperand(a.a,s.config.n) && validOperand(a.b,s.config.m) && typeof a.correct === 'boolean' && typeof a.input === 'string' && Number.isFinite(a.expected))) return false;
   session = s; screen = 'practice';
+  if (s.config.operator === 'divide') {
+    if (s.divisionRule !== DIVISION_RULE || s.config.n < s.config.m) {
+      finish(); toast('除法规则已更新，上一轮成绩已保留。请开始新的整除练习。'); return true;
+    }
+    if (!isExactDivision(s.question) || !isAllowedDividend(s.question.a) || !isAllowedDivisor(s.question.b)) { s.question = makeQuestion(s.config); write(KEYS.session, s); }
+  }
   if (!remainingMs(session)) finish(); else { renderPractice(); startTimer(); toast('已恢复本次练习，倒计时继续。'); }
   return true;
 }

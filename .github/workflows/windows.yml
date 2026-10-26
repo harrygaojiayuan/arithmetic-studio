@@ -1,0 +1,89 @@
+name: Test and build Windows app
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npm run check
+
+  windows:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run check
+      - name: Build installer and portable ZIP
+        run: npm run build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Start packaged app and verify Windows runtime
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'release/win-unpacked/ArithmeticStudio.exe').Path
+          $data = Join-Path $env:RUNNER_TEMP 'ArithmeticStudio-smoke-data'
+          $report = Join-Path $env:RUNNER_TEMP 'ArithmeticStudio-smoke.json'
+          $process = Start-Process -FilePath $exe -ArgumentList @('--smoke-test', "--smoke-data-dir=$data", "--smoke-report=$report") -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            Stop-Process -Id $process.Id -Force
+            throw 'Packaged app timed out during Windows smoke tests.'
+          }
+          if (-not (Test-Path $report)) { throw 'Packaged app did not produce a smoke-test report.' }
+          Get-Content $report
+          $result = Get-Content $report -Raw | ConvertFrom-Json
+          if ($process.ExitCode -ne 0 -or -not $result.ok) { throw 'Windows smoke tests failed.' }
+          Copy-Item $report 'release/Windows-smoke-test.json'
+      - name: Compute download checksums
+        run: node scripts/checksums.mjs release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ArithmeticStudio-Windows-x64
+          path: |
+            release/*.exe
+            release/*.zip
+            release/SHA256SUMS.txt
+            release/Windows-smoke-test.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish Windows downloads to private repository release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $assets = Get-ChildItem release -File | Where-Object { $_.Extension -in '.exe', '.zip' -or $_.Name -in 'SHA256SUMS.txt', 'Windows-smoke-test.json' } | ForEach-Object { $_.FullName }
+          gh release view $tag --repo $env:GH_REPO *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @assets --clobber --repo $env:GH_REPO
+          } else {
+            gh release create $tag @assets --title "算数练习室 $tag · Windows" --notes-file docs/RELEASE_NOTES.md --repo $env:GH_REPO
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the Windows downloads.' }
