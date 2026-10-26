@@ -4,7 +4,7 @@
 
 ## Windows 下载与安装
 
-从本仓库的 [Releases](https://github.com/harrygaojiayuan/arithmetic-studio/releases) 下载最新版本。仓库为私有仓库，下载时需要使用有访问权限的 GitHub 账号。
+从本仓库的 [Releases](https://github.com/harrygaojiayuan/arithmetic-studio/releases) 下载最新版本。仓库已公开，可直接访问下载页。
 
 - **安装版 `.exe`**：按向导安装，从桌面快捷方式或开始菜单打开「算数练习室」。
 - **免安装 `.zip`**：先完整解压，再双击 `ArithmeticStudio.exe`。同目录下的运行文件需要一起保留。
@@ -34,13 +34,17 @@ GitHub Actions 会在每次提交时运行测试。推送 `v*` 版本标签或�
 
 ## 打开 Mac App
 
-双击本项目上一层的「算数练习室.app」。安装后也可从个人 Applications 文件夹打开。
+从 [Releases](https://github.com/harrygaojiayuan/arithmetic-studio/releases) 下载 `macos-universal.dmg`，将「算数练习室.app」拖入 Applications 文件夹。也可以下载 Mac 版 `.zip`，解压后打开 App。支持 macOS 12 及以上版本，适用于 Apple Silicon（M 系列）和 Intel Mac。
+
+Mac 版有本地临时签名，未进行 Apple Developer ID 签名和公证，下载后首次打开可能显示无法验证开发者的提示。
 
 Mac App 的设置、成绩和进行中的练习保存在 `~/Library/Application Support/ArithmeticStudio/data.json`，关闭 App 后仍会保留，更新 App 不会覆盖数据。倒计时在 App 关闭期间仍然继续；重新打开时恢复练习，已经到时则自动结算。
 
 ## 从源码构建 Mac App
 
-在本目录执行 `python3 native/build_app.py`。需要 macOS 的 Xcode Command Line Tools 和 Node.js（仅构建时检查脚本语法）。构建生成适用于 Apple Silicon Mac 的 `.app`，应用运行时无需安装这些工具。
+在本目录执行 `python3 native/build_app.py`。需要 macOS 的 Xcode Command Line Tools 和 Node.js（仅构建时检查脚本语法）。默认构建适用于 Apple Silicon Mac 的 `.app`；加上 `--arch universal` 可同时支持 Intel Mac。应用运行时无需安装这些工具。
+
+执行 `python3 native/package_macos.py` 可构建通用版 App，并在 `release/` 生成 `.dmg`、`.zip` 和 Mac 校验值文件。
 
 `native/main.swift` 负责原生窗口、应用菜单和本地文件存储，`native/build_app.py` 将所有页面资源打包进 App。应用不会请求外部网页。
 

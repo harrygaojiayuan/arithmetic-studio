@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build an offline macOS .app using the system Swift compiler; no packages required."""
 import argparse
+import json
 import plistlib
 import re
 import shutil
@@ -12,8 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output', type=Path, default=ROOT.parent / '算数练习室.app')
+parser.add_argument('--arch', choices=['arm64', 'x86_64', 'universal'], default='arm64')
 args = parser.parse_args()
 destination = args.output.resolve()
+version = json.loads((ROOT / 'package.json').read_text())['version']
 if destination.suffix != '.app':
     parser.error('Output must end in .app')
 
@@ -52,8 +55,8 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
         'CFBundleExecutable': 'ArithmeticStudio',
         'CFBundleIdentifier': 'local.jacksongao.ArithmeticStudio',
         'CFBundlePackageType': 'APPL',
-        'CFBundleShortVersionString': '1.0.1',
-        'CFBundleVersion': '2',
+        'CFBundleShortVersionString': version,
+        'CFBundleVersion': version,
         'CFBundleIconFile': 'AppIcon',
         'LSMinimumSystemVersion': '12.0',
         'LSApplicationCategoryType': 'public.app-category.education',
@@ -66,10 +69,20 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
         plistlib.dump(metadata, f)
     (contents / 'PkgInfo').write_text('APPL????')
     module_cache = Path(tempfile.gettempdir()) / 'arithmetic-studio-swift-module-cache'
-    subprocess.run(['xcrun', 'swiftc', '-O', '-target', 'arm64-apple-macosx12.0',
-                    '-module-cache-path', str(module_cache), str(ROOT / 'native/main.swift'),
-                    '-framework', 'Cocoa', '-framework', 'WebKit',
-                    '-o', str(executables / 'ArithmeticStudio')], check=True)
+    architectures = ['arm64', 'x86_64'] if args.arch == 'universal' else [args.arch]
+    binaries = []
+    for architecture in architectures:
+        binary = work / f'ArithmeticStudio-{architecture}'
+        subprocess.run(['xcrun', 'swiftc', '-O', '-target', f'{architecture}-apple-macosx12.0',
+                        '-module-cache-path', str(module_cache), str(ROOT / 'native/main.swift'),
+                        '-framework', 'Cocoa', '-framework', 'WebKit',
+                        '-o', str(binary)], check=True)
+        binaries.append(binary)
+    if len(binaries) > 1:
+        subprocess.run(['xcrun', 'lipo', '-create', *map(str, binaries),
+                        '-output', str(executables / 'ArithmeticStudio')], check=True)
+    else:
+        shutil.copy2(binaries[0], executables / 'ArithmeticStudio')
     subprocess.run(['xcrun', 'swift', '-module-cache-path', str(module_cache),
                     str(ROOT / 'native/make-icon.swift'), str(work / 'AppIcon.iconset')], check=True)
     # ICNS uses a big-endian container of PNG representations. Writing it directly
