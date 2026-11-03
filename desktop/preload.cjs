@@ -9,6 +9,17 @@ function request(message) {
 
 const values = Object.assign(Object.create(null), request({ action: 'snapshot' }));
 contextBridge.exposeInMainWorld('ArithmeticDesktop', true);
+contextBridge.exposeInMainWorld('arithmeticUpdates', {
+  getState: () => ipcRenderer.invoke('practice-update', 'state'),
+  check: () => ipcRenderer.invoke('practice-update', 'check'),
+  download: () => ipcRenderer.invoke('practice-update', 'download'),
+  install: () => ipcRenderer.invoke('practice-update', 'install'),
+  onState(callback) {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('practice-update-state', listener);
+    return () => ipcRenderer.removeListener('practice-update-state', listener);
+  }
+});
 contextBridge.exposeInMainWorld('arithmeticStorage', {
   getItem(key) { key = String(key); return Object.hasOwn(values, key) ? values[key] : null; },
   setItem(key, value) {

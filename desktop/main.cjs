@@ -3,11 +3,12 @@ const { app, BrowserWindow, Menu, protocol, session, ipcMain, dialog } = require
 const fs = require('node:fs');
 const path = require('node:path');
 const { PracticeStore } = require('./store.cjs');
+const { UpdateController } = require('./updates.cjs');
 
 const APP_URL = 'arithmetic://app/index.html';
 const smoke = process.argv.includes('--smoke-test');
 const option = name => process.argv.find(arg => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-let window, store;
+let window, store, updates;
 const rendererErrors = [];
 app.setName('ArithmeticStudio');
 const directory = smoke ? option('--smoke-data-dir') : path.join(app.getPath('appData'), 'ArithmeticStudio');
@@ -23,9 +24,10 @@ else {
       store = new PracticeStore(app.getPath('userData'));
       installStorage();
       installProtocol();
+      installUpdates();
       session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
       session.defaultSession.setPermissionCheckHandler(() => false);
-      // This app serves bundled assets only and never needs a network connection.
+      // The practice renderer stays offline. Updates use a separate main-process session.
       session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
       window = new BrowserWindow({
         title: '算数练习室', width: 1100, height: 850, minWidth: 380, minHeight: 620,
@@ -69,10 +71,40 @@ else {
   });
 }
 
+function trustedSender(event) {
+  return window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame && event.senderFrame.url === APP_URL;
+}
+function installUpdates() {
+  const updater = smoke ? require('./smoke.cjs').makeSmokeUpdater() : require('electron-updater').autoUpdater;
+  updater.logger = null;
+  if (!smoke) {
+    updater.setFeedURL({ provider:'github', owner:'harrygaojiayuan', repo:'arithmetic-studio' });
+    const hosts = new Set(['github.com','api.github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']);
+    updater.netSession.webRequest.onBeforeRequest((details, callback) => {
+      const url = new URL(details.url);
+      callback({ cancel:url.protocol !== 'https:' || !hosts.has(url.hostname) });
+    });
+    updater.netSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      for (const key of Object.keys(details.requestHeaders)) if (key.toLowerCase() === 'x-user-staging-id') delete details.requestHeaders[key];
+      callback({ requestHeaders:details.requestHeaders });
+    });
+  }
+  updates = new UpdateController(updater, { currentVersion:app.getVersion(), supported:smoke || (app.isPackaged && process.platform === 'win32') });
+  updates.on('change', state => { if (window && !window.webContents.isDestroyed()) window.webContents.send('practice-update-state', state); });
+  ipcMain.handle('practice-update', async (event, action) => {
+    if (!trustedSender(event)) throw new Error('无效的应用页面');
+    if (action === 'state') return updates.snapshot();
+    if (action === 'check') return updates.check();
+    if (action === 'download') return updates.download();
+    if (action === 'install') return updates.install();
+    throw new Error('无效的更新操作');
+  });
+}
+
 function installStorage() {
   ipcMain.on('practice-storage', (event, message) => {
     try {
-      if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== APP_URL) throw new Error('无效的应用页面');
+      if (!trustedSender(event)) throw new Error('无效的应用页面');
       if (message?.action === 'snapshot') event.returnValue = { ok: true, value: store.snapshot() };
       else {
         store.update(message?.action, message?.key, message?.value);
@@ -83,7 +115,7 @@ function installStorage() {
 }
 
 function installProtocol() {
-  const types = new Map([['index.html','text/html'], ['styles.css','text/css'], ['app.mjs','text/javascript'], ['core.mjs','text/javascript']]);
+  const types = new Map([['index.html','text/html'], ['styles.css','text/css'], ['app.mjs','text/javascript'], ['core.mjs','text/javascript'], ['twentyfour-bank.mjs','text/javascript']]);
   protocol.handle('arithmetic', request => {
     const url = new URL(request.url);
     const file = url.pathname.slice(1);

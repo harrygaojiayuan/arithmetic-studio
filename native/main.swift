@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var webView: WKWebView!
     var store: PracticeStore!
     var isClosing = false
+    let updater = PracticeUpdater()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -38,12 +39,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             configuration.websiteDataStore = .nonPersistent()
             configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
             configuration.userContentController.add(self, name: "arithmeticStorage")
+            configuration.userContentController.add(self, name: "arithmeticUpdates")
             let resources = Bundle.main.resourceURL!
             let bridge = try String(contentsOf: resources.appendingPathComponent("storage-bridge.js"), encoding: .utf8)
             let initial = String(data: try JSONEncoder().encode(store.values), encoding: .utf8)!
             configuration.userContentController.addUserScript(WKUserScript(
                 source: "window.__ARITHMETIC_INITIAL_DATA__ = \(initial);\n" + bridge,
                 injectionTime: .atDocumentStart, forMainFrameOnly: true))
+            let updateBridge = try String(contentsOf: resources.appendingPathComponent("update-bridge.js"), encoding: .utf8)
+            configuration.userContentController.addUserScript(WKUserScript(source:updateBridge, injectionTime:.atDocumentStart, forMainFrameOnly:true))
+            updater.onChange = { [weak self] state in self?.sendUpdateState(state) }
 
             webView = WKWebView(frame: .zero, configuration: configuration)
             webView.navigationDelegate = self
@@ -112,6 +117,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "arithmeticUpdates" {
+            guard message.frameInfo.isMainFrame, let body = message.body as? [String:Any],
+                  let id = body["id"] as? Int, let action = body["action"] as? String,
+                  ["state","check","download","install"].contains(action) else { return }
+            updater.action(action)
+            sendUpdateState(updater.state, replyID:id)
+            return
+        }
         guard message.frameInfo.isMainFrame,
               let body = message.body as? [String: Any],
               let action = body["action"] as? String,
@@ -125,6 +138,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         do { try store.save() } catch {
             webView.evaluateJavaScript("window.dispatchEvent(new Event('arithmetic-storage-error'))", completionHandler: nil)
         }
+    }
+
+    func sendUpdateState(_ state: [String:Any], replyID: Int? = nil) {
+        guard let data = try? JSONSerialization.data(withJSONObject:state),
+              let json = String(data:data, encoding:.utf8) else { return }
+        let script = replyID.map { "window.__arithmeticUpdateReply?.(\($0), \(json))" }
+            ?? "window.__arithmeticUpdateState?.(\(json))"
+        webView?.evaluateJavaScript(script, completionHandler:nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -168,6 +189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         webView.configuration.userContentController.addUserScript(WKUserScript(
             source: "window.__ARITHMETIC_INITIAL_DATA__ = \(initial);\n" + bridge,
             injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        if let updateBridge = try? String(contentsOf:resources.appendingPathComponent("update-bridge.js"), encoding:.utf8) {
+            webView.configuration.userContentController.addUserScript(WKUserScript(source:updateBridge, injectionTime:.atDocumentStart, forMainFrameOnly:true))
+        }
         webView.loadHTMLString(html, baseURL: resources)
     }
 }

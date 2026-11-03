@@ -1,6 +1,6 @@
 {
   "name": "arithmetic-studio",
-  "version": "1.1.0",
+  "version": "1.2.4",
   "description": "离线算数练习室：自定义位数、限时练习、个人排行榜。支持 Windows 和 macOS。",
   "author": "harrygaojiayuan",
   "license": "UNLICENSED",
@@ -11,7 +11,8 @@
     "start": "electron .",
     "preview": "python3 -m http.server 5173 --bind 127.0.0.1 --directory dist",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/app.mjs && node --check dist/core.mjs && node --check desktop/main.cjs && node --check desktop/preload.cjs && node --check desktop/store.cjs && node --check desktop/smoke.cjs",
+    "check": "node --check dist/app.mjs && node --check dist/core.mjs && node --check dist/twentyfour-bank.mjs && node --check desktop/main.cjs && node --check desktop/preload.cjs && node --check native/update-bridge.js && node --check desktop/updates.cjs && node --check desktop/store.cjs && node --check desktop/smoke.cjs && node scripts/make-twentyfour-bank.mjs --check",
+    "generate:24": "node scripts/make-twentyfour-bank.mjs",
     "icons": "node scripts/make-icons.mjs",
     "build:win": "npm run icons && electron-builder --win --x64 --publish never"
   },
@@ -24,11 +25,22 @@
     "productName": "算数练习室",
     "executableName": "ArithmeticStudio",
     "asar": true,
-    "directories": { "output": "release" },
-    "files": ["desktop/**", "dist/**", "assets/icon.png", "assets/icon.ico", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**",
+      "dist/**",
+      "assets/icon.png",
+      "assets/icon.ico",
+      "package.json"
+    ],
     "artifactName": "ArithmeticStudio-${version}-windows-${arch}.${ext}",
     "win": {
-      "target": ["nsis", "zip"],
+      "target": [
+        "nsis",
+        "zip"
+      ],
       "icon": "assets/icon.ico"
     },
     "nsis": {
@@ -39,7 +51,20 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": false,
       "deleteAppDataOnUninstall": false,
-      "installerLanguages": ["zh_CN", "en_US"]
-    }
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "harrygaojiayuan",
+        "repo": "arithmetic-studio"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
   }
 }

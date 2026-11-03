@@ -11,3 +11,9 @@ coverage/
 .openai/
 *.tmp
 *.bak
+.idea/
+# Personal practice data and updater caches must never be committed.
+data.json
+local-data-*.json
+*-smoke-data/
+.updaterId

@@ -29,14 +29,16 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
     executables = contents / 'MacOS'
     resources.mkdir(parents=True)
     executables.mkdir()
-    core = re.sub(r'^export ', '', (ROOT / 'dist/core.mjs').read_text(), flags=re.M)
+    bank = re.sub(r'^export ', '', (ROOT / 'dist/twentyfour-bank.mjs').read_text(), flags=re.M)
+    core = re.sub(r'^import .*?;\s*', '', (ROOT / 'dist/core.mjs').read_text(), count=1)
+    core = re.sub(r'^export ', '', core, flags=re.M)
     app = re.sub(r'^import .*?;\s*', '', (ROOT / 'dist/app.mjs').read_text(), count=1)
     app = (app.replace('当前浏览器', '这台电脑')
               .replace('浏览器存储不可用', '本地存储不可用')
               .replace('关闭页面后设置和成绩将无法保存', '退出 App 后设置和成绩将无法保存')
               .replace('清除浏览器数据会删除记录', '关闭 App 后仍会保留记录')
               .replace('切换页面不会暂停', '切换窗口或关闭 App 后也不会暂停'))
-    script = f'(() => {{\n{core}\n{app}\n}})();'
+    script = f'(() => {{\n{bank}\n{core}\n{app}\n}})();'
     # Keep closing script text safe if future question copy includes HTML examples.
     script = script.replace('</script', '<\\/script')
     html = (ROOT / 'dist/index.html').read_text()
@@ -45,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
     html = html.replace('</body>', '<script>\n' + script + '\n</script>\n</body>')
     (resources / 'index.html').write_text(html)
     shutil.copy2(ROOT / 'native/storage-bridge.js', resources)
+    shutil.copy2(ROOT / 'native/update-bridge.js', resources)
     (work / 'bundle.js').write_text(script)
     subprocess.run(['node', '--check', str(work / 'bundle.js')], check=True)
     metadata = {
@@ -74,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
     for architecture in architectures:
         binary = work / f'ArithmeticStudio-{architecture}'
         subprocess.run(['xcrun', 'swiftc', '-O', '-target', f'{architecture}-apple-macosx12.0',
-                        '-module-cache-path', str(module_cache), str(ROOT / 'native/main.swift'),
+                        '-module-cache-path', str(module_cache), str(ROOT / 'native/main.swift'), str(ROOT / 'native/updates.swift'),
                         '-framework', 'Cocoa', '-framework', 'WebKit',
                         '-o', str(binary)], check=True)
         binaries.append(binary)
