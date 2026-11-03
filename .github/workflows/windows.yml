@@ -79,6 +79,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 20
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -87,14 +89,16 @@ jobs:
       - name: Build and verify universal Mac downloads
         run: python3 native/package_macos.py
       - name: Sign Mac update manifest
+        id: sign
         env:
           MACOS_UPDATE_PRIVATE_KEY: ${{ secrets.MACOS_UPDATE_PRIVATE_KEY }}
         run: |
           if [ -n "$MACOS_UPDATE_PRIVATE_KEY" ]; then
             node scripts/make-macos-appcast.mjs
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            echo 'Mac update signing key is required for publishing.' >&2
-            exit 1
+            echo 'signed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Archive verified. Sign appcast locally before publishing this release.'
+            echo 'signed=false' >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/upload-artifact@v7
         with:
@@ -111,7 +115,7 @@ jobs:
 
   publish:
     needs: [windows, macos]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && needs.macos.outputs.signed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

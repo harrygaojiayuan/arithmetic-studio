@@ -85,4 +85,4 @@ Mac App 的设置、成绩和进行中的练习保存在 `~/Library/Application 
 
 发布新版本时，更新 `package.json` / `package-lock.json` 中的版本号，再推送对应的 `vX.Y.Z` 标签。GitHub Actions 从干净检出构建，个人 `data.json`、`qa/`、本机备份和 IDE 配置不参与提交或打包。
 
-Mac 构建固定使用 `native/sparkle.json` 指定的 Sparkle 发行包并验证 SHA-256。更新公钥嵌入 App；私钥只用于发布签名，不能提交到仓库或打包进 App。`scripts/make-macos-appcast.mjs` 从 `MACOS_UPDATE_PRIVATE_KEY` 读取签名密钥，生成随 Release 发布的 `appcast.xml`。Mac 构建还实际运行升级、重启和篡改包拒绝测试。
+Mac 构建固定使用 `native/sparkle.json` 指定的 Sparkle 发行包并验证 SHA-256。更新公钥嵌入 App；私钥只用于发布签名，不能提交到仓库或打包进 App。`scripts/make-macos-appcast.mjs` 从 `MACOS_UPDATE_PRIVATE_KEY` 读取签名密钥，生成随 Release 发布的 `appcast.xml`。默认将私钥保存在本机被 Git 忽略的 `.release-secrets/`，下载已验证的 CI 安装包后本机签名、发布；只有明确配置同名 GitHub Actions Secret 后，标签工作流才会自动签名并发布。未配置私钥时只构建验证，不会发布缺少签名的版本。Mac 构建还实际运行升级、重启和篡改包拒绝测试。

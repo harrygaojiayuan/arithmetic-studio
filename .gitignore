@@ -17,3 +17,4 @@ data.json
 local-data-*.json
 *-smoke-data/
 .updaterId
+.release-secrets/

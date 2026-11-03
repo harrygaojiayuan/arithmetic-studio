@@ -32,7 +32,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const version = JSON.parse(readFileSync('package.json')).version;
   const { publicKey } = JSON.parse(readFileSync('native/sparkle.json'));
   if (!process.env.MACOS_UPDATE_PRIVATE_KEY) throw new Error('MACOS_UPDATE_PRIVATE_KEY is required to sign a Mac release');
-  const archive = readFileSync(`release/ArithmeticStudio-${version}-macos-universal.zip`);
-  writeFileSync('release/appcast.xml', makeAppcast({ version, archive, publicKey, privateKey:process.env.MACOS_UPDATE_PRIVATE_KEY }));
+  const directory = resolve(process.argv[2] || 'release');
+  const archive = readFileSync(resolve(directory, `ArithmeticStudio-${version}-macos-universal.zip`));
+  writeFileSync(resolve(directory, 'appcast.xml'), makeAppcast({ version, archive, publicKey, privateKey:process.env.MACOS_UPDATE_PRIVATE_KEY }));
   console.log(`Signed Mac update manifest for ${version}; private key was not written to the release.`);
 }

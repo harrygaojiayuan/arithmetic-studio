@@ -53,6 +53,7 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
     (resources / 'index.html').write_text(html)
     shutil.copy2(ROOT / 'native/storage-bridge.js', resources)
     shutil.copy2(ROOT / 'native/update-bridge.js', resources)
+    shutil.copy2(ROOT / 'native/SPARKLE-LICENSE.txt', resources)
     (work / 'bundle.js').write_text(script)
     subprocess.run(['node', '--check', str(work / 'bundle.js')], check=True)
     metadata = {
