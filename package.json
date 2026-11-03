@@ -1,6 +1,6 @@
 {
   "name": "arithmetic-studio",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "离线算数练习室：自定义位数、限时练习、个人排行榜。支持 Windows 和 macOS。",
   "author": "harrygaojiayuan",
   "license": "UNLICENSED",

@@ -15,7 +15,7 @@ exports.makeSmokeUpdater = () => {
   };
   smokeUpdater.downloadUpdate = async () => {
     smokeUpdater.emit('download-progress', { percent:50 });
-    await new Promise(resolve => setTimeout(resolve,50));
+    await new Promise(resolve => setTimeout(resolve,250));
     smokeUpdater.emit('update-downloaded', { version:'99.0.0' });
     return ['isolated-test-installer.exe'];
   };
@@ -48,9 +48,8 @@ exports.runSmoke = async (window, store, reportFile) => {
   await evaluate(`document.querySelector('[data-action="check-update"]').click();`);
   await waitFor("document.querySelector('.update-message')?.textContent.includes('最新版本')", 'already up to date');
   await evaluate(`document.querySelector('[data-action="check-update"]').click();`);
-  await waitFor("Boolean(document.querySelector('[data-action=\"download-update\"]'))", 'available update');
-  await evaluate(`document.querySelector('[data-action="download-update"]').click();`);
-  await waitFor("Boolean(document.querySelector('[data-action=\"install-update\"]'))", 'downloaded update');
+  await waitFor("Boolean(document.querySelector('[data-action=\"install-update\"]'))", 'available update');
+  assert.equal(await evaluate("Boolean(document.querySelector('[data-action=\"download-update\"]'))"),false);
   assert.equal(smokeUpdater.installCalls,0);
   await evaluate(`document.querySelector('[data-action="operator"][data-value="divide"]').click(); document.querySelector('[data-action="save-settings"]').click();`);
   assert.equal(JSON.parse(store.snapshot()['arithmetic-studio.config.v1']).operator, 'divide');
@@ -229,7 +228,8 @@ exports.runSmoke = async (window, store, reportFile) => {
   await capture('updates');
   const scoresBeforeUpdate = store.snapshot()['arithmetic-studio.records.v1'];
   await click('install-update');
-  await waitFor("document.querySelector('.update-message')?.textContent.includes('正在安装')", 'explicit update installation');
+  await waitFor("Boolean(document.querySelector('.update-progress'))", 'background update download');
+  await waitFor("document.querySelector('.update-message')?.textContent.includes('正在安装')", 'automatic update installation');
   await evaluate('window.arithmeticUpdates.install()');
   assert.equal(smokeUpdater.installCalls,1);
   assert.equal(store.snapshot()['arithmetic-studio.records.v1'],scoresBeforeUpdate);

@@ -9,6 +9,7 @@ import struct
 import subprocess
 import tempfile
 from pathlib import Path
+from sparkle import CONFIG as SPARKLE, distribution
 
 ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -17,6 +18,7 @@ parser.add_argument('--arch', choices=['arm64', 'x86_64', 'universal'], default=
 args = parser.parse_args()
 destination = args.output.resolve()
 version = json.loads((ROOT / 'package.json').read_text())['version']
+sparkle_distribution = distribution()
 if destination.suffix != '.app':
     parser.error('Output must end in .app')
 
@@ -29,6 +31,9 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
     executables = contents / 'MacOS'
     resources.mkdir(parents=True)
     executables.mkdir()
+    frameworks = contents / 'Frameworks'
+    frameworks.mkdir()
+    shutil.copytree(sparkle_distribution / 'Sparkle.framework', frameworks / 'Sparkle.framework', symlinks=True)
     bank = re.sub(r'^export ', '', (ROOT / 'dist/twentyfour-bank.mjs').read_text(), flags=re.M)
     core = re.sub(r'^import .*?;\s*', '', (ROOT / 'dist/core.mjs').read_text(), count=1)
     core = re.sub(r'^export ', '', core, flags=re.M)
@@ -67,6 +72,12 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
         'NSSupportsAutomaticGraphicsSwitching': True,
         'NSPrincipalClass': 'NSApplication',
         'NSHumanReadableCopyright': '算数练习室 · 本地离线版',
+        'SUFeedURL': 'https://github.com/harrygaojiayuan/arithmetic-studio/releases/latest/download/appcast.xml',
+        'SUPublicEDKey': SPARKLE['publicKey'],
+        'SUEnableAutomaticChecks': False,
+        'SUAutomaticallyUpdate': False,
+        'SUSendProfileInfo': False,
+        'SUVerifyUpdateBeforeExtraction': True,
     }
     with (contents / 'Info.plist').open('wb') as f:
         plistlib.dump(metadata, f)
@@ -79,6 +90,8 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
         subprocess.run(['xcrun', 'swiftc', '-O', '-target', f'{architecture}-apple-macosx12.0',
                         '-module-cache-path', str(module_cache), str(ROOT / 'native/main.swift'), str(ROOT / 'native/updates.swift'),
                         '-framework', 'Cocoa', '-framework', 'WebKit',
+                        '-F', str(frameworks), '-framework', 'Sparkle',
+                        '-Xlinker', '-rpath', '-Xlinker', '@executable_path/../Frameworks',
                         '-o', str(binary)], check=True)
         binaries.append(binary)
     if len(binaries) > 1:
@@ -110,5 +123,5 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-') as work:
         if not existing.exists() or plistlib.loads(existing.read_bytes()).get('CFBundleIdentifier') != metadata['CFBundleIdentifier']:
             parser.error('Refusing to replace an unrelated application')
         shutil.rmtree(destination)
-    shutil.copytree(bundle, destination)
+    shutil.copytree(bundle, destination, symlinks=True)
 print(f'已构建：{destination}')

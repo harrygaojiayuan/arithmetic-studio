@@ -18,7 +18,7 @@ class UpdateController extends EventEmitter {
     updater.on('update-available', info => this.set({ status:'available', version:info.version, message:`发现新版本 ${info.version}。` }));
     updater.on('update-not-available', () => this.set({ status:'current', version:null, message:'当前已是最新版本。' }));
     updater.on('download-progress', info => this.set({ status:'downloading', progress:Math.min(100, Math.max(0, Math.round(info.percent || 0))), message:'正在下载更新，请稍候…' }));
-    updater.on('update-downloaded', info => this.set({ status:'downloaded', version:info.version, progress:100, message:'下载和校验已完成，可以安装并重启。练习记录会保留。' }));
+    updater.on('update-downloaded', info => this.set({ status:'downloaded', version:info.version, progress:100, message:'下载和校验已完成，正在准备重启…' }));
     updater.on('error', error => this.fail(error));
   }
   snapshot() { return { ...this.state }; }
@@ -40,20 +40,17 @@ class UpdateController extends EventEmitter {
       if (!result) throw new Error('Updater unavailable');
     });
   }
-  download() {
+  install() {
     if (!this.state.supported || this.state.status !== 'available') return Promise.resolve(this.snapshot());
     return this.run(async () => {
-      this.set({ status:'downloading', progress:0, message:'正在下载更新，请稍候…' });
+      this.set({ status:'downloading', progress:0, message:'正在后台下载更新，完成后将自动安装并重启…' });
       await this.updater.downloadUpdate();
+      if (this.state.status !== 'downloaded') throw new Error('Download did not complete');
+      this.set({ status:'installing', message:'正在安装更新，应用将自动重新启动…' });
+      setImmediate(() => {
+        try { this.updater.quitAndInstall(true, true); } catch (error) { this.fail(error); }
+      });
     });
-  }
-  install() {
-    if (!this.state.supported || this.state.status !== 'downloaded') return this.snapshot();
-    this.set({ status:'installing', message:'正在安装更新，应用将重新启动…' });
-    setImmediate(() => {
-      try { this.updater.quitAndInstall(true, true); } catch (error) { this.fail(error); }
-    });
-    return this.snapshot();
   }
 }
 module.exports = { UpdateController };

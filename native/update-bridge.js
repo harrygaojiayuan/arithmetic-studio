@@ -14,7 +14,7 @@
   });
   window.arithmeticUpdates = Object.freeze({
     getState: () => request('state'), check: () => request('check'),
-    download: () => request('download'), install: () => request('install'),
+    install: () => request('install'),
     onState(callback) { listeners.add(callback); return () => listeners.delete(callback); }
   });
 })();

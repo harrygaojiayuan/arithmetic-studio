@@ -86,6 +86,16 @@ jobs:
           node-version: '24'
       - name: Build and verify universal Mac downloads
         run: python3 native/package_macos.py
+      - name: Sign Mac update manifest
+        env:
+          MACOS_UPDATE_PRIVATE_KEY: ${{ secrets.MACOS_UPDATE_PRIVATE_KEY }}
+        run: |
+          if [ -n "$MACOS_UPDATE_PRIVATE_KEY" ]; then
+            node scripts/make-macos-appcast.mjs
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo 'Mac update signing key is required for publishing.' >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: ArithmeticStudio-macOS-universal
@@ -94,6 +104,8 @@ jobs:
             release/*-macos-universal.zip
             release/SHA256SUMS-macos.txt
             release/Mac-build-verification.json
+            release/Mac-update-verification.json
+            release/appcast.xml
           if-no-files-found: error
           retention-days: 30
 
@@ -120,7 +132,8 @@ jobs:
           set -euo pipefail
           test "$TAG" = "v$(node -p "require('./package.json').version")"
           test -f release/latest.yml
-          assets=(release/*.exe release/*.exe.blockmap release/*.zip release/*.dmg release/SHA256SUMS*.txt release/*verification.json release/Windows-smoke-test.json release/latest.yml)
+          test -f release/appcast.xml
+          assets=(release/*.exe release/*.exe.blockmap release/*.zip release/*.dmg release/SHA256SUMS*.txt release/*verification.json release/Windows-smoke-test.json release/latest.yml release/appcast.xml)
           if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release upload "$TAG" "${assets[@]}" --clobber --repo "$GH_REPO"
           else

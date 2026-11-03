@@ -71,8 +71,8 @@ function renderSettings() {
 }
 function updatePanel() {
   if (!updateAPI) return '';
-  const state = updateState, active = ['loading','checking','downloading','installing'].includes(state.status);
-  return `<section class="panel update-panel" id="update-panel" aria-label="应用更新"><div class="update-heading"><div><h2 class="field-title">应用更新</h2><p class="field-description">当前版本 ${esc(state.currentVersion || '…')} · GitHub 正式版</p></div><button class="secondary-btn" data-action="check-update" ${active || !state.supported || state.status === 'downloaded' ? 'disabled' : ''}>${state.status === 'checking' ? '检查中…' : '检查更新'}</button></div><p class="update-message ${state.status === 'error' ? 'error-text' : ''}" role="status" aria-live="polite">${esc(state.message)}</p>${state.status === 'available' ? `<button class="primary-btn" data-action="download-update">下载 ${esc(state.version)}</button>` : ''}${state.status === 'downloading' ? `<progress class="update-progress" max="100" value="${Number(state.progress) || 0}" aria-label="更新下载进度"></progress><span class="field-description">${Number(state.progress) || 0}%</span>` : ''}${state.status === 'downloaded' ? `<button class="primary-btn" data-action="install-update">${esc(state.installLabel || '安装并重启')}</button>` : ''}<p class="field-description update-privacy">仅在检查或下载更新时连接 GitHub；做题记录保留在本机，不会上传。</p></section>`;
+  const state = updateState, active = ['loading','checking','downloading','downloaded','preparing','installing'].includes(state.status);
+  return `<section class="panel update-panel" id="update-panel" aria-label="应用更新"><div class="update-heading"><div><h2 class="field-title">应用更新</h2><p class="field-description">当前版本 ${esc(state.currentVersion || '…')} · GitHub 正式版</p></div><button class="secondary-btn" data-action="check-update" ${active || !state.supported ? 'disabled' : ''}>${state.status === 'checking' ? '检查中…' : '检查更新'}</button></div><p class="update-message ${state.status === 'error' ? 'error-text' : ''}" role="status" aria-live="polite">${esc(state.message)}</p>${state.status === 'available' ? `<button class="primary-btn" data-action="install-update">安装新版本 ${esc(state.version)}</button><p class="field-description">后台下载并校验，完成后自动安装、重启；练习记录会保留。</p>` : ''}${state.status === 'downloading' ? `<progress class="update-progress" max="100" value="${Number(state.progress) || 0}" aria-label="更新下载进度"></progress><span class="field-description">${Number(state.progress) || 0}%</span>` : ''}<p class="field-description update-privacy">仅在检查或下载更新时连接 GitHub；做题记录保留在本机，不会上传。</p></section>`;
 }
 function receiveUpdateState(state) {
   updateState = state;
@@ -276,7 +276,6 @@ document.addEventListener('click', event => {
   switch (action) {
     case 'home': case 'settings': case 'ranking': go(action); break;
     case 'check-update': runUpdateAction('check'); break;
-    case 'download-update': runUpdateAction('download'); break;
     case 'install-update': runUpdateAction('install'); break;
     case 'start': startDialog(); break;
     case 'start-24': startDialog(TWENTY_FOUR_CONFIG); break;

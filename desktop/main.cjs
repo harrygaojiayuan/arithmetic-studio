@@ -95,7 +95,6 @@ function installUpdates() {
     if (!trustedSender(event)) throw new Error('无效的应用页面');
     if (action === 'state') return updates.snapshot();
     if (action === 'check') return updates.check();
-    if (action === 'download') return updates.download();
     if (action === 'install') return updates.install();
     throw new Error('无效的更新操作');
   });

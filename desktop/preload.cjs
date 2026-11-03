@@ -12,7 +12,6 @@ contextBridge.exposeInMainWorld('ArithmeticDesktop', true);
 contextBridge.exposeInMainWorld('arithmeticUpdates', {
   getState: () => ipcRenderer.invoke('practice-update', 'state'),
   check: () => ipcRenderer.invoke('practice-update', 'check'),
-  download: () => ipcRenderer.invoke('practice-update', 'download'),
   install: () => ipcRenderer.invoke('practice-update', 'install'),
   onState(callback) {
     const listener = (_event, state) => callback(state);

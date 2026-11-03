@@ -120,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if message.name == "arithmeticUpdates" {
             guard message.frameInfo.isMainFrame, let body = message.body as? [String:Any],
                   let id = body["id"] as? Int, let action = body["action"] as? String,
-                  ["state","check","download","install"].contains(action) else { return }
+                  ["state","check","install"].contains(action) else { return }
             updater.action(action)
             sendUpdateState(updater.state, replyID:id)
             return

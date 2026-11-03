@@ -46,6 +46,8 @@ with tempfile.TemporaryDirectory(prefix='arithmetic-macos-package-') as work:
     subprocess.run(['ditto', '-x', '-k', str(zip_path), str(extracted)], check=True)
     subprocess.run(['codesign', '--verify', '--deep', '--strict',
                     str(extracted / bundle.name)], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'native/tests/test_updates.py'),
+                    str(extracted / bundle.name)], check=True, cwd=ROOT)
 
 files = [dmg_path, zip_path]
 sums = [f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}' for file in files]
